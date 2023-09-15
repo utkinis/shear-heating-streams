@@ -1,4 +1,6 @@
 using KernelAbstractions
+const KA = KernelAbstractions
+
 using CUDA
 
 @kernel function update_stress!(Pr, Vx, Vy, Kdt, dx, dy)
@@ -46,12 +48,12 @@ function main(backend)
     Kdt = K * dt
     dt_rho = dt / rho
     # array allocation
-    Pr = KernelAbstractions.zeros(backend, Float64, nx, ny)
-    Vx = KernelAbstractions.zeros(backend, Float64, nx + 1, ny)
-    Vy = KernelAbstractions.zeros(backend, Float64, nx, ny + 1)
+    Pr = KA.zeros(backend, Float64, nx, ny)
+    Vx = KA.zeros(backend, Float64, nx + 1, ny)
+    Vy = KA.zeros(backend, Float64, nx, ny + 1)
     # init
     init_Pr!(backend, (32, 8), (nx, ny))(Pr, Lw, xc, yc)
-    KernelAbstractions.synchronize(backend)
+    KA.synchronize(backend)
 
     Pr_ini = Array(Pr)
     # action
@@ -60,7 +62,7 @@ function main(backend)
         @info "it" it
         update_stress!(backend, (32, 8), (nx, ny))(Pr, Vx, Vy, Kdt, dx, dy)
         update_velocity!(backend, (32, 8), (nx + 1, ny + 1))(Vx, Vy, Pr, dt_rho, dx, dy)
-        KernelAbstractions.synchronize(backend)
+        KA.synchronize(backend)
     end
 
     GBs = 2 * (sizeof(Pr) + sizeof(Vx) + sizeof(Vy)) / ttot / 1e9 * nt

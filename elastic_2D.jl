@@ -1,4 +1,6 @@
 using KernelAbstractions
+const KA = KernelAbstractions
+
 using CUDA
 
 Base.@propagate_inbounds avx(A, ix, iy) = 0.5 * (A[ix, iy] + A[ix + 1, iy])
@@ -52,7 +54,7 @@ function main(backend)
     G0     = 1.0
     rho0   = 1.0
     # numerics
-    nx, ny = 128, 128
+    nx, ny = 1024 - 1, 1024 - 1
     nt     = nx
     # preprocessing
     dx, dy = Lx/nx, Ly/ny
@@ -61,30 +63,32 @@ function main(backend)
     # parameters
     dt = dx / sqrt((K0 + 4/3 * G0) / rho0) / 2
     # array allocation
-    Pr  = KernelAbstractions.zeros(backend, Float64, nx    , ny    )
-    Txx = KernelAbstractions.zeros(backend, Float64, nx    , ny    )
-    Tyy = KernelAbstractions.zeros(backend, Float64, nx    , ny    )
-    Txy = KernelAbstractions.zeros(backend, Float64, nx - 1, ny - 1)
-    Vx  = KernelAbstractions.zeros(backend, Float64, nx + 1, ny    )
-    Vy  = KernelAbstractions.zeros(backend, Float64, nx    , ny + 1)
-    G   = KernelAbstractions.zeros(backend, Float64, nx    , ny    )
-    K   = KernelAbstractions.zeros(backend, Float64, nx    , ny    )
-    rho = KernelAbstractions.zeros(backend, Float64, nx    , ny    )
+    Pr  = KA.zeros(backend, Float64, nx    , ny    )
+    Txx = KA.zeros(backend, Float64, nx    , ny    )
+    Tyy = KA.zeros(backend, Float64, nx    , ny    )
+    Txy = KA.zeros(backend, Float64, nx - 1, ny - 1)
+    Vx  = KA.zeros(backend, Float64, nx + 1, ny    )
+    Vy  = KA.zeros(backend, Float64, nx    , ny + 1)
+    G   = KA.zeros(backend, Float64, nx    , ny    )
+    K   = KA.zeros(backend, Float64, nx    , ny    )
+    rho = KA.zeros(backend, Float64, nx    , ny    )
     # init
     init_Pr!(backend, (32, 8), (nx, ny))(Pr, Lw, xc, yc)
     G   .= G0
     K   .= K0
     rho .= rho0
-    KernelAbstractions.synchronize(backend)
+    KA.synchronize(backend)
 
     Pr_ini = Array(Pr)
 
     # action
-    ttot = @elapsed for it in 1:nt
-        @info "it" it
-        update_stress!(backend, (32, 8), (nx, ny))(Pr, Txx, Tyy, Txy, Vx, Vy, K, G, dt, dx, dy)
-        update_velocity!(backend, (32, 8), (nx + 1, ny + 1))(Vx, Vy, Pr, Txx, Tyy, Txy, rho, dt, dx, dy)
-        KernelAbstractions.synchronize(backend)
+    ttot = @elapsed begin
+        for it in 1:nt
+            @info "it" it
+            update_stress!(backend, (32, 8), (nx, ny))(Pr, Txx, Tyy, Txy, Vx, Vy, K, G, dt, dx, dy)
+            update_velocity!(backend, (32, 8), (nx + 1, ny + 1))(Vx, Vy, Pr, Txx, Tyy, Txy, rho, dt, dx, dy)
+        end
+        KA.synchronize(backend)
     end
 
     GBs = (2 * (sizeof(Pr) + sizeof(Txx) + sizeof(Tyy) + sizeof(Txy) + sizeof(Vx) + sizeof(Vy)) + 1 * (sizeof(G) + sizeof(K) + sizeof(rho))) / ttot / 1e9 * nt
