@@ -109,6 +109,6 @@ function main(backend)
     return
 end
 
-# main(CPU())
-main(CUDABackend())
+main(CPU())
+# main(CUDABackend())
 # main(ROCBackend())

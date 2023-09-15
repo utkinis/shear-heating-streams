@@ -1,7 +1,7 @@
 using KernelAbstractions
 const KA = KernelAbstractions
 
-using CUDA
+# using CUDA
 # using AMDGPU
 
 Base.@propagate_inbounds avx(A, ix, iy) = 0.5 * (A[ix, iy] + A[ix + 1, iy])
@@ -130,7 +130,7 @@ function main(backend)
     return
 end
 
-# main(CPU())
-main(CUDABackend())
+main(CPU())
+# main(CUDABackend())
 # main(ROCBackend())
 
