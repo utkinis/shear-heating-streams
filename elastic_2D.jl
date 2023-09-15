@@ -55,8 +55,9 @@ function main(backend)
     nx, ny = 128, 128
     nt     = nx
     # preprocessing
-    dx, dy = Lx / nx, Ly / ny
-    xc, yc = LinRange(-Lx / 2 + dx / 2, Lx / 2 - dx / 2, nx), LinRange(-Ly / 2 + dy / 2, Ly / 2 - dy / 2, ny)
+    dx, dy = Lx/nx, Ly/ny
+    xc = LinRange(-Lx/2 + dx/2, Lx/2 - dx/2, nx)
+    yc = LinRange(-Ly/2 + dy/2, Ly/2 - dy/2, ny)
     # parameters
     dt = dx / sqrt((K0 + 4/3 * G0) / rho0) / 2
     # array allocation
@@ -77,8 +78,8 @@ function main(backend)
     KernelAbstractions.synchronize(backend)
 
     Pr_ini = Array(Pr)
-    # action
 
+    # action
     ttot = @elapsed for it in 1:nt
         @info "it" it
         update_stress!(backend, (32, 8), (nx, ny))(Pr, Txx, Tyy, Txy, Vx, Vy, K, G, dt, dx, dy)
@@ -90,18 +91,15 @@ function main(backend)
 
     println("time = $ttot s, bandwidth = $GBs GB/s")
 
-    Pr_c = Array(Pr)
-    open("dparams.dat", "w") do io
-        write(io, Lx, Ly, dx, dy)
-    end
-
-    open("iparams.dat", "w") do io
-        write(io, nx, ny)
-    end
+    open(io -> write(io, Lx, Ly, dx, dy), "dparams.dat", "w")
+    open(io -> write(io, nx, ny), "iparams.dat", "w")
+    
+    Pr_res = Array(Pr)
     open("Pr.dat", "w") do io
         write(io, Pr_ini)
-        write(io, Pr_c)
+        write(io, Pr_res)
     end
+
     return
 end
 

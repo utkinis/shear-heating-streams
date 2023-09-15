@@ -21,25 +21,26 @@ end
     end
 end
 
-@kernel function init_Pr!(Pr, lw, xc, yc)
+@kernel function init_Pr!(Pr, Lw, xc, yc)
     ix, iy = @index(Global, NTuple)
     @inbounds if ix <= size(Pr, 1) && iy <= size(Pr, 2)
-        Pr[ix, iy] = exp(-(xc[ix] / lw)^2 - (yc[iy] / lw)^2)
+        Pr[ix, iy] = exp(-(xc[ix] / Lw)^2 - (yc[iy] / Lw)^2)
     end
 end
 
 function main(backend)
     # physics
     Lx, Ly = 1.0, 1.0
-    lw = 0.1Lx
+    Lw = 0.1Lx
     K = 1.0
     rho = 1.0
     # numerics
     nx, ny = 128, 128
     nt     = nx
     # preprocessing
-    dx, dy = Lx / nx, Ly / ny
-    xc, yc = LinRange(-Lx / 2 + dx / 2, Lx / 2 - dx / 2, nx), LinRange(-Ly / 2 + dy / 2, Ly / 2 - dy / 2, ny)
+    dx, dy = Lx/nx, Ly/ny
+    xc = LinRange(-Lx/2 + dx/2, Lx/2 - dx/2, nx)
+    yc = LinRange(-Ly/2 + dy/2, Ly/2 - dy/2, ny)
     # parameters
     dt = dx / sqrt(K / rho) / 2.0
     Kdt = K * dt
@@ -49,7 +50,7 @@ function main(backend)
     Vx = KernelAbstractions.zeros(backend, Float64, nx + 1, ny)
     Vy = KernelAbstractions.zeros(backend, Float64, nx, ny + 1)
     # init
-    init_Pr!(backend, (32, 8), (nx, ny))(Pr, lw, xc, yc)
+    init_Pr!(backend, (32, 8), (nx, ny))(Pr, Lw, xc, yc)
     KernelAbstractions.synchronize(backend)
 
     Pr_ini = Array(Pr)
@@ -66,18 +67,15 @@ function main(backend)
 
     println("time = $ttot s, bandwidth = $GBs GB/s")
 
-    Pr_h = Array(Pr)
-    open("dparams.dat", "w") do io
-        write(io, Lx, Ly, dx, dy)
-    end
-
-    open("iparams.dat", "w") do io
-        write(io, nx, ny)
-    end
+    open(io -> write(io, Lx, Ly, dx, dy), "dparams.dat", "w")
+    open(io -> write(io, nx, ny), "iparams.dat", "w")
+    
+    Pr_res = Array(Pr)
     open("Pr.dat", "w") do io
         write(io, Pr_ini)
-        write(io, Pr_h)
+        write(io, Pr_res)
     end
+
     return
 end
 
