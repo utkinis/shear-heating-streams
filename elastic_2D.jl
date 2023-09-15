@@ -47,8 +47,8 @@ end
 end
 
 function main(backend)
-     # remove .dat files
-     rm.(filter(f->last(splitext(f)) == ".dat", readdir()))
+    # remove .dat files
+    rm.(filter(f->last(splitext(f)) == ".dat", readdir()))
     # physics
     Lx, Ly = 1.0, 1.0
     Lw     = 0.1Lx
