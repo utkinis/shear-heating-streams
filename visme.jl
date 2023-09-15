@@ -20,7 +20,7 @@ plt = (
     P_ini = heatmap!(ax.P_ini, P, colormap=:turbo),
     T_ini = heatmap!(ax.T_ini, T, colormap=:turbo),
     P     = heatmap!(ax.P    , P, colormap=:turbo),
-    T     = heatmap!(ax.T    , T, colormap=:turbo),
+    T     = heatmap!(ax.T    , T, colormap=:turbo, colorrange=(0,1)),
 )
 
 Colorbar(fig[1,1][1,2], plt.P_ini)
