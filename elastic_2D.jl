@@ -2,6 +2,7 @@ using KernelAbstractions
 const KA = KernelAbstractions
 
 # using CUDA
+# using AMDGPU
 
 Base.@propagate_inbounds avx(A, ix, iy) = 0.5 * (A[ix, iy] + A[ix + 1, iy])
 Base.@propagate_inbounds avy(A, ix, iy) = 0.5 * (A[ix, iy] + A[ix, iy + 1])
@@ -108,3 +109,4 @@ end
 
 main(CPU())
 # main(CUDABackend())
+# main(ROCBackend())

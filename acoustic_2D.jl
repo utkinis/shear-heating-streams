@@ -2,6 +2,7 @@ using KernelAbstractions
 const KA = KernelAbstractions
 
 # using CUDA
+# using AMDGPU
 
 @kernel function update_stress!(Pr, Vx, Vy, Kdt, dx, dy)
     ix, iy = @index(Global, NTuple)
@@ -86,3 +87,4 @@ end
 
 main(CPU())
 # main(CUDABackend())
+# main(ROCBackend())
