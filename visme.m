@@ -17,16 +17,12 @@ for it = 0:nsave:nt
     Pr     = fread(fid, [nx ny], "double");
     T      = fread(fid, [nx ny], "double");
     fclose(fid);
-
     sgtitle(it)
-
     if it == 0
         nexttile(1); imagesc(Pr); axis image; colorbar             ; title("p_0")
         nexttile(2); imagesc(T) ; axis image; colorbar; clim([0 1]); title("T_0")
     end
-    
     nexttile(3); imagesc(Pr); axis image; colorbar             ; title("p")
     nexttile(4); imagesc(T) ; axis image; colorbar; clim([0 1]); title("T")
-
     drawnow
 end

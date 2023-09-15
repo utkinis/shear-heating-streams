@@ -1,7 +1,7 @@
 using KernelAbstractions
 const KA = KernelAbstractions
 
-# using CUDA
+using CUDA
 # using AMDGPU
 
 Base.@propagate_inbounds avx(A, ix, iy) = 0.5 * (A[ix, iy] + A[ix + 1, iy])
@@ -104,9 +104,9 @@ function main(backend)
     rho .= rho0
     KA.synchronize(backend)
     # write parameters
-    open(io -> write(io, Lx, Ly, dx, dy), "dparams.dat", "w")
-    open(io -> write(io, nx, ny, nt, nsave), "iparams.dat", "w")
-    open(io -> write(io, Pr, T), "step_0.dat", "w")
+    write("dparams.dat", Lx, Ly, dx, dy)
+    write("iparams.dat", nx, ny, nt, nsave)
+    write("step_0.dat", Array(Pr), Array(T))
     # action
     ttot = @elapsed begin
         for it in 1:nt
@@ -114,14 +114,13 @@ function main(backend)
             update_V_T!(backend, (32, 8), (nx + 1, ny + 1))(Vx, Vy, Pr, Txx, Tyy, Txy, rho, T, qTx, qTy, Cp, dt, dx, dy)
             if save_steps && it % nsave == 0
                 @info "save" it
-                open(io -> write(io, Pr, T), "step_$it.dat", "w")
+                KA.synchronize(backend)
+                write("step_$it.dat", Array(Pr), Array(T))
             end
         end
         KA.synchronize(backend)
     end
-    if !save_steps 
-        open(io -> write(io, Pr, T), "step_$nt.dat", "w")
-    end
+    if !save_steps write("step_$nt.dat", Array(Pr), Array(T)) end
     # calculate memory throughput
     size_rw = sizeof(Pr) + sizeof(Txx) + sizeof(Tyy) + sizeof(Txy) + sizeof(Vx) + sizeof(Vy) +
               sizeof(T) + sizeof(qTx) + sizeof(qTy)
@@ -131,7 +130,7 @@ function main(backend)
     return
 end
 
-main(CPU())
-# main(CUDABackend())
+# main(CPU())
+main(CUDABackend())
 # main(ROCBackend())
 
