@@ -20,8 +20,8 @@ Base.@propagate_inbounds av4(A, ix, iy) = 0.25 * (A[ix, iy    ] + A[ix + 1, iy  
         Tyy[ix, iy] +=  dt * 2.0 * G[ix, iy] * (eyy - divV / 3.0)
     end
     @inbounds if ix <= size(Txy, 1) && iy <= size(Txy, 2)
-        exy = 0.5 * ( (Vx[ix+1,iy+1] - Vx[ix+1,iy]) / dy +
-                      (Vy[ix+1,iy+1] - Vy[ix,iy+1]) / dx)
+        exy = 0.5 * ((Vx[ix+1,iy+1] - Vx[ix+1,iy]) / dy +
+                     (Vy[ix+1,iy+1] - Vy[ix,iy+1]) / dx)
         Txy[ix, iy] += dt * 2.0 * av4(G, ix, iy) * exy
     end
     @inbounds if 1 < ix < size(qTx, 1) && iy <= size(qTx, 2)
