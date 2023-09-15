@@ -1,7 +1,7 @@
 using KernelAbstractions
 const KA = KernelAbstractions
 
-using CUDA
+# using CUDA
 
 @kernel function update_stress!(Pr, Vx, Vy, Kdt, dx, dy)
     ix, iy = @index(Global, NTuple)
@@ -31,14 +31,18 @@ end
 end
 
 function main(backend)
+     # remove .dat files
+     rm.(filter(f->last(splitext(f)) == ".dat", readdir()))
     # physics
     Lx, Ly = 1.0, 1.0
-    Lw = 0.1Lx
-    K = 1.0
-    rho = 1.0
+    Lw     = 0.1Lx
+    K      = 1.0
+    rho    = 1.0
     # numerics
-    nx, ny = 128, 128
-    nt     = nx
+    nx, ny     = 512 - 1, 512 - 1
+    nsave      = 100
+    nt         = 10nsave
+    save_steps = true
     # preprocessing
     dx, dy = Lx/nx, Ly/ny
     xc = LinRange(-Lx/2 + dx/2, Lx/2 - dx/2, nx)
@@ -54,30 +58,29 @@ function main(backend)
     # init
     init_Pr!(backend, (32, 8), (nx, ny))(Pr, Lw, xc, yc)
     KA.synchronize(backend)
-
-    Pr_ini = Array(Pr)
+    # write parameters
+    open(io -> write(io, Lx, Ly, dx, dy), "dparams.dat", "w")
+    open(io -> write(io, nx, ny, nt, nsave), "iparams.dat", "w")
+    open(io -> write(io, Pr), "step_0.dat", "w")
     # action
-
-    ttot = @elapsed for it in 1:nt
-        @info "it" it
-        update_stress!(backend, (32, 8), (nx, ny))(Pr, Vx, Vy, Kdt, dx, dy)
-        update_velocity!(backend, (32, 8), (nx + 1, ny + 1))(Vx, Vy, Pr, dt_rho, dx, dy)
+    ttot = @elapsed begin 
+        for it in 1:nt
+            update_stress!(backend, (32, 8), (nx, ny))(Pr, Vx, Vy, Kdt, dx, dy)
+            update_velocity!(backend, (32, 8), (nx + 1, ny + 1))(Vx, Vy, Pr, dt_rho, dx, dy)
+            if save_steps && it % nsave == 0
+                @info "save" it
+                open(io -> write(io, Pr), "step_$it.dat", "w")
+            end
+        end
         KA.synchronize(backend)
     end
-
-    GBs = 2 * (sizeof(Pr) + sizeof(Vx) + sizeof(Vy)) / ttot / 1e9 * nt
-
-    println("time = $ttot s, bandwidth = $GBs GB/s")
-
-    open(io -> write(io, Lx, Ly, dx, dy), "dparams.dat", "w")
-    open(io -> write(io, nx, ny), "iparams.dat", "w")
-    
-    Pr_res = Array(Pr)
-    open("Pr.dat", "w") do io
-        write(io, Pr_ini)
-        write(io, Pr_res)
+    if !save_steps 
+        open(io -> write(io, Pr, T), "step_$nt.dat", "w")
     end
-
+    # calculate memory throughput
+    size_rw = sizeof(Pr) + sizeof(Vx) + sizeof(Vy)
+    GBs     = (2 * size_rw) / ttot / 1e9 * nt
+    println("time = $ttot s, bandwidth = $GBs GB/s")
     return
 end
 

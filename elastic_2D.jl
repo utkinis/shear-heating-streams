@@ -1,7 +1,7 @@
 using KernelAbstractions
 const KA = KernelAbstractions
 
-using CUDA
+# using CUDA
 
 Base.@propagate_inbounds avx(A, ix, iy) = 0.5 * (A[ix, iy] + A[ix + 1, iy])
 Base.@propagate_inbounds avy(A, ix, iy) = 0.5 * (A[ix, iy] + A[ix, iy + 1])
@@ -47,6 +47,8 @@ end
 end
 
 function main(backend)
+     # remove .dat files
+     rm.(filter(f->last(splitext(f)) == ".dat", readdir()))
     # physics
     Lx, Ly = 1.0, 1.0
     Lw     = 0.1Lx
@@ -54,8 +56,10 @@ function main(backend)
     G0     = 1.0
     rho0   = 1.0
     # numerics
-    nx, ny = 1024 - 1, 1024 - 1
-    nt     = nx
+    nx, ny     = 512 - 1, 512 - 1
+    nsave      = 100
+    nt         = 10nsave
+    save_steps = true
     # preprocessing
     dx, dy = Lx/nx, Ly/ny
     xc = LinRange(-Lx/2 + dx/2, Lx/2 - dx/2, nx)
@@ -78,32 +82,27 @@ function main(backend)
     K   .= K0
     rho .= rho0
     KA.synchronize(backend)
-
-    Pr_ini = Array(Pr)
-
+    # write parameters
+    open(io -> write(io, Lx, Ly, dx, dy), "dparams.dat", "w")
+    open(io -> write(io, nx, ny, nt, nsave), "iparams.dat", "w")
+    open(io -> write(io, Pr), "step_0.dat", "w")
     # action
     ttot = @elapsed begin
         for it in 1:nt
-            @info "it" it
             update_stress!(backend, (32, 8), (nx, ny))(Pr, Txx, Tyy, Txy, Vx, Vy, K, G, dt, dx, dy)
             update_velocity!(backend, (32, 8), (nx + 1, ny + 1))(Vx, Vy, Pr, Txx, Tyy, Txy, rho, dt, dx, dy)
+            if save_steps && it % nsave == 0
+                @info "save" it
+                open(io -> write(io, Pr), "step_$it.dat", "w")
+            end
         end
         KA.synchronize(backend)
     end
-
-    GBs = (2 * (sizeof(Pr) + sizeof(Txx) + sizeof(Tyy) + sizeof(Txy) + sizeof(Vx) + sizeof(Vy)) + 1 * (sizeof(G) + sizeof(K) + sizeof(rho))) / ttot / 1e9 * nt
-
+    # calculate memory throughput
+    size_rw = sizeof(Pr) + sizeof(Txx) + sizeof(Tyy) + sizeof(Txy) + sizeof(Vx) + sizeof(Vy)
+    size_r  = sizeof(G) + sizeof(K) + sizeof(rho)
+    GBs     = (2 * size_rw + 1 * size_r) / ttot / 1e9 * nt
     println("time = $ttot s, bandwidth = $GBs GB/s")
-
-    open(io -> write(io, Lx, Ly, dx, dy), "dparams.dat", "w")
-    open(io -> write(io, nx, ny), "iparams.dat", "w")
-    
-    Pr_res = Array(Pr)
-    open("Pr.dat", "w") do io
-        write(io, Pr_ini)
-        write(io, Pr_res)
-    end
-
     return
 end
 
