@@ -68,7 +68,7 @@ end
 
 function main(backend)
     # remove .dat files
-    rm.(filter(f -> last(splitext(f)) == ".dat", readdir()))
+    rm("out", force=true, recursive=true); mkdir("out")
     # physics
     Lx, Ly = 1.0, 1.0
     Lw     = 0.1Lx
@@ -82,7 +82,7 @@ function main(backend)
     # numerics
     nx, ny     = 512 - 1, 512 - 1
     nsave      = 100
-    nt         = 50nsave
+    nt         = 10nsave
     save_steps = true
     # preprocessing
     dx, dy = Lx / nx, Ly / ny
@@ -91,7 +91,8 @@ function main(backend)
     # parameters
     dt_elasto = dx / sqrt((K0 + 4 / 3 * G0) / rho0) / 2.1
     dt_thermo = dx^2 / (lambda * Cp) / 4.1
-    dt = 0.25min(dt_elasto, dt_thermo)
+    dt_adv    = (K0 + 4 / 3 * G0) / Pr0 * dt_elasto
+    dt = min(dt_elasto, dt_thermo, dt_adv)
     # array allocation
     Pr    = KA.zeros(backend, Float64, nx, ny)
     Txx   = KA.zeros(backend, Float64, nx, ny)
@@ -113,9 +114,9 @@ function main(backend)
     rho .= rho0
     KA.synchronize(backend)
     # write parameters
-    write("dparams.dat", Lx, Ly, dx, dy)
-    write("iparams.dat", nx, ny, nt, nsave)
-    write("step_0.dat", Array(Pr), Array(T))
+    write("out/dparams.dat", Lx, Ly, dx, dy)
+    write("out/iparams.dat", nx, ny, nt, nsave)
+    write("out/step_0.dat", Array(Pr), Array(T))
     # action
     ttot = @elapsed begin
         for it in 1:nt
@@ -124,13 +125,13 @@ function main(backend)
             if save_steps && it % nsave == 0
                 @info "save" it
                 KA.synchronize(backend)
-                write("step_$it.dat", Array(Pr), Array(T))
+                write("out/step_$it.dat", Array(Pr), Array(T))
             end
         end
         KA.synchronize(backend)
     end
     if !save_steps
-        write("step_$nt.dat", Array(Pr), Array(T))
+        write("out/step_$nt.dat", Array(Pr), Array(T))
     end
     # calculate memory throughput
     size_rw = sizeof(Pr) + sizeof(Txx) + sizeof(Tyy) + sizeof(Txy) + sizeof(Vx) + sizeof(Vy) +

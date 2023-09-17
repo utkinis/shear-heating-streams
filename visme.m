@@ -1,11 +1,11 @@
 clear; figure(1); clf; colormap turbo;
 
-fid  = fopen("iparams.dat", "r");
+fid  = fopen("out/iparams.dat", "r");
 iparams = num2cell(fread(fid, 4, "int64"));
 [nx, ny, nt, nsave] = deal(iparams{:})
 fclose(fid);
 
-fid  = fopen("dparams.dat", "r");
+fid  = fopen("out/dparams.dat", "r");
 dparams = num2cell(fread(fid, 4, "double"));
 [Lx, Ly, dx, dy] = deal(dparams{:})
 fclose(fid);
@@ -13,7 +13,7 @@ fclose(fid);
 tiledlayout(2,2, "TileSpacing", "tight", "Padding", "tight")
 
 for it = 0:nsave:nt
-    fid    = fopen(['step_' num2str(it) '.dat'], "r");
+    fid    = fopen(['out/step_' num2str(it) '.dat'], "r");
     Pr     = fread(fid, [nx ny], "double");
     T      = fread(fid, [nx ny], "double");
     fclose(fid);

@@ -1,7 +1,7 @@
 using CairoMakie
 
-nx, ny, nt, nsave = reinterpret(Int    , read("iparams.dat"))
-Lx, Ly, dx, dy    = reinterpret(Float64, read("dparams.dat"))
+nx, ny, nt, nsave = reinterpret(Int    , read("out/iparams.dat"))
+Lx, Ly, dx, dy    = reinterpret(Float64, read("out/dparams.dat"))
 
 fig = Figure(resolution=(1200,1000),fontsize=32)
 ax  = (
@@ -29,7 +29,7 @@ Colorbar(fig[2,1][1,2], plt.P)
 Colorbar(fig[2,2][1,2], plt.T)
 
 for it in 0:nsave:nt
-    open("step_$it.dat","r") do io
+    open("out/step_$it.dat","r") do io
         read!(io, P)
         read!(io, T)
     end

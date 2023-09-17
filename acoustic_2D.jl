@@ -33,7 +33,7 @@ end
 
 function main(backend)
     # remove .dat files
-    rm.(filter(f -> last(splitext(f)) == ".dat", readdir()))
+    rm("out", force=true, recursive=true); mkdir("out")
     # physics
     Lx, Ly = 1.0, 1.0
     Lw     = 0.1Lx
@@ -60,9 +60,9 @@ function main(backend)
     init_Pr!(backend, (32, 8), (nx, ny))(Pr, Lw, xc, yc)
     KA.synchronize(backend)
     # write parameters
-    write("dparams.dat", Lx, Ly, dx, dy)
-    write("iparams.dat", nx, ny, nt, nsave)
-    write("step_0.dat", Array(Pr))
+    write("out/dparams.dat", Lx, Ly, dx, dy)
+    write("out/iparams.dat", nx, ny, nt, nsave)
+    write("out/step_0.dat", Array(Pr))
     # action
     ttot = @elapsed begin
         for it in 1:nt
@@ -71,13 +71,13 @@ function main(backend)
             if save_steps && it % nsave == 0
                 @info "save" it
                 KA.synchronize(backend)
-                write("step_$it.dat", Array(Pr))
+                write("out/step_$it.dat", Array(Pr))
             end
         end
         KA.synchronize(backend)
     end
     if !save_steps
-        write("step_$nt.dat", Array(Pr))
+        write("out/step_$nt.dat", Array(Pr))
     end
     # calculate memory throughput
     size_rw = sizeof(Pr) + sizeof(Vx) + sizeof(Vy)
