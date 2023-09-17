@@ -134,7 +134,7 @@ function main(backend)
     end
     # calculate memory throughput
     size_rw = sizeof(Pr) + sizeof(Txx) + sizeof(Tyy) + sizeof(Txy) + sizeof(Vx) + sizeof(Vy) +
-              sizeof(T) + sizeof(qTx) + sizeof(qTy)
+              sizeof(T) + sizeof(divfT) + sizeof(qTx) + sizeof(qTy)
     size_r = sizeof(G) + sizeof(K) + sizeof(rho)
     GBs = (2 * size_rw + 1 * size_r) / ttot / 1e9 * nt
     println("time = $ttot s, bandwidth = $GBs GB/s")
