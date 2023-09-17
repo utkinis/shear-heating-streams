@@ -9,7 +9,7 @@ Base.@propagate_inbounds avy(A, ix, iy) = 0.5 * (A[ix, iy] + A[ix, iy + 1])
 
 Base.@propagate_inbounds av4(A, ix, iy) = 0.25 * (A[ix, iy] + A[ix + 1, iy] + A[ix, iy + 1] + A[ix + 1, iy + 1])
 
-@kernel function update_sigma_qT!(Pr, Txx, Tyy, Txy, Vx, Vy, qTx, qTy, T, K, G, lambda, dt, dx, dy)
+@kernel function update_sigma_qT!(Pr, Txx, Tyy, Txy, Vx, Vy, qTx, qTy, divfT, T, K, G, lambda, dt, dx, dy)
     ix, iy = @index(Global, NTuple)
     @inbounds if ix <= size(Pr, 1) && iy <= size(Pr, 2)
         exx = (Vx[ix + 1, iy] - Vx[ix, iy]) / dx
@@ -30,9 +30,16 @@ Base.@propagate_inbounds av4(A, ix, iy) = 0.25 * (A[ix, iy] + A[ix + 1, iy] + A[
     @inbounds if ix <= size(qTy, 1) && 1 < iy < size(qTy, 2)
         qTy[ix, iy] = -avy(lambda, ix, iy - 1) * (T[ix, iy] - T[ix, iy - 1]) / dy
     end
+    @inbounds if ix <= size(divfT, 1) && iy <= size(divfT, 2)
+        Fe = max(Vx[ix, iy], 0.0) * T[max(ix - 1, 1), iy] + min(Vx[ix, iy], 0.0) * T[ix, iy]
+        Fw = max(Vx[ix + 1, iy], 0.0) * T[ix, iy] + min(Vx[ix + 1, iy], 0.0) * T[min(ix + 1, size(T, 1)), iy]
+        Fs = max(Vy[ix, iy], 0.0) * T[ix, max(iy - 1, 1)] + min(Vy[ix, iy], 0.0) * T[ix, iy]
+        Fn = max(Vy[ix, iy + 1], 0.0) * T[ix, iy] + min(Vy[ix, iy + 1], 0.0) * T[ix, min(iy + 1, size(T, 2))]
+        divfT[ix, iy] = (Fw - Fe) / dx + (Fn - Fs) / dy
+    end
 end
 
-@kernel function update_V_T!(Vx, Vy, Pr, Txx, Tyy, Txy, rho, T, qTx, qTy, Cp, dt, dx, dy)
+@kernel function update_V_T!(Vx, Vy, Pr, Txx, Tyy, Txy, rho, T, divfT, qTx, qTy, Cp, dt, dx, dy)
     ix, iy = @index(Global, NTuple)
     @inbounds if 1 < ix < size(Vx, 1) && 1 < iy < size(Vx, 2)
         Vx[ix, iy] += dt / avx(rho, ix - 1, iy) * (-(Pr[ix, iy] - Pr[ix - 1, iy]) / dx +
@@ -47,7 +54,7 @@ end
     @inbounds if ix <= size(T, 1) && iy <= size(T, 2)
         divqT = (qTx[ix + 1, iy] - qTx[ix, iy]) / dx +
                 (qTy[ix, iy + 1] - qTy[ix, iy]) / dy
-        T[ix, iy] += dt / (rho[ix, iy] * Cp) * (-divqT)
+        T[ix, iy] -= dt * (divqT / (rho[ix, iy] * Cp) + divfT[ix, iy])
     end
 end
 
@@ -67,7 +74,7 @@ function main(backend)
     Lw     = 0.1Lx
     K0     = 1.0
     G0     = 1.0
-    Pr0    = 1.0
+    Pr0    = 10.0
     T0     = 1.0
     rho0   = 1.0
     lambda = 1.0e-3
@@ -75,29 +82,30 @@ function main(backend)
     # numerics
     nx, ny     = 512 - 1, 512 - 1
     nsave      = 100
-    nt         = 10nsave
+    nt         = 50nsave
     save_steps = true
     # preprocessing
     dx, dy = Lx / nx, Ly / ny
     xc = LinRange(-Lx / 2 + dx / 2, Lx / 2 - dx / 2, nx)
     yc = LinRange(-Ly / 2 + dy / 2, Ly / 2 - dy / 2, ny)
     # parameters
-    dt_elasto = dx / sqrt((K0 + 4 / 3 * G0) / rho0) / 2
-    dt_thermo = dx^2 / (lambda * Cp) / 4
-    dt = min(dt_elasto, dt_thermo)
+    dt_elasto = dx / sqrt((K0 + 4 / 3 * G0) / rho0) / 2.1
+    dt_thermo = dx^2 / (lambda * Cp) / 4.1
+    dt = 0.25min(dt_elasto, dt_thermo)
     # array allocation
-    Pr  = KA.zeros(backend, Float64, nx, ny)
-    Txx = KA.zeros(backend, Float64, nx, ny)
-    Tyy = KA.zeros(backend, Float64, nx, ny)
-    Txy = KA.zeros(backend, Float64, nx - 1, ny - 1)
-    Vx  = KA.zeros(backend, Float64, nx + 1, ny)
-    Vy  = KA.zeros(backend, Float64, nx, ny + 1)
-    G   = KA.zeros(backend, Float64, nx, ny)
-    K   = KA.zeros(backend, Float64, nx, ny)
-    rho = KA.zeros(backend, Float64, nx, ny)
-    T   = KA.zeros(backend, Float64, nx, ny)
-    qTx = KA.zeros(backend, Float64, nx + 1, ny)
-    qTy = KA.zeros(backend, Float64, nx, ny + 1)
+    Pr    = KA.zeros(backend, Float64, nx, ny)
+    Txx   = KA.zeros(backend, Float64, nx, ny)
+    Tyy   = KA.zeros(backend, Float64, nx, ny)
+    Txy   = KA.zeros(backend, Float64, nx - 1, ny - 1)
+    Vx    = KA.zeros(backend, Float64, nx + 1, ny)
+    Vy    = KA.zeros(backend, Float64, nx, ny + 1)
+    G     = KA.zeros(backend, Float64, nx, ny)
+    K     = KA.zeros(backend, Float64, nx, ny)
+    rho   = KA.zeros(backend, Float64, nx, ny)
+    T     = KA.zeros(backend, Float64, nx, ny)
+    divfT = KA.zeros(backend, Float64, nx, ny)
+    qTx   = KA.zeros(backend, Float64, nx + 1, ny)
+    qTy   = KA.zeros(backend, Float64, nx, ny + 1)
     # init
     init_Pr_and_T!(backend, (32, 8), (nx, ny))(Pr, T, Pr0, T0, Lw, xc, yc)
     G   .= G0
@@ -111,8 +119,8 @@ function main(backend)
     # action
     ttot = @elapsed begin
         for it in 1:nt
-            update_sigma_qT!(backend, (32, 8), (nx, ny))(Pr, Txx, Tyy, Txy, Vx, Vy, qTx, qTy, T, K, G, lambda, dt, dx, dy)
-            update_V_T!(backend, (32, 8), (nx + 1, ny + 1))(Vx, Vy, Pr, Txx, Tyy, Txy, rho, T, qTx, qTy, Cp, dt, dx, dy)
+            update_sigma_qT!(backend, (32, 8), (nx, ny))(Pr, Txx, Tyy, Txy, Vx, Vy, qTx, qTy, divfT, T, K, G, lambda, dt, dx, dy)
+            update_V_T!(backend, (32, 8), (nx + 1, ny + 1))(Vx, Vy, Pr, Txx, Tyy, Txy, rho, T, divfT, qTx, qTy, Cp, dt, dx, dy)
             if save_steps && it % nsave == 0
                 @info "save" it
                 KA.synchronize(backend)
