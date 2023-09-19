@@ -68,7 +68,8 @@ end
 
 function main(backend)
     # remove .dat files
-    rm("out", force=true, recursive=true); mkdir("out")
+    rm("out"; force=true, recursive=true)
+    mkdir("out")
     # physics
     Lx, Ly = 1.0, 1.0
     Lw     = 0.1Lx
@@ -92,7 +93,7 @@ function main(backend)
     dt_elasto = dx / sqrt((K0 + 4 / 3 * G0) / rho0) / 2.1
     dt_thermo = dx^2 / (lambda * Cp) / 4.1
     dt_adv    = (K0 + 4 / 3 * G0) / Pr0 * dt_elasto
-    dt = min(dt_elasto, dt_thermo, dt_adv)
+    dt        = min(dt_elasto, dt_thermo, dt_adv)
     # array allocation
     Pr    = KA.zeros(backend, Float64, nx, ny)
     Txx   = KA.zeros(backend, Float64, nx, ny)

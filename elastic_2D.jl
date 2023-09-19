@@ -48,7 +48,8 @@ end
 
 function main(backend)
     # remove .dat files
-    rm("out", force=true, recursive=true); mkdir("out")
+    rm("out"; force=true, recursive=true)
+    mkdir("out")
     # physics
     Lx, Ly = 1.0, 1.0
     Lw     = 0.1Lx
