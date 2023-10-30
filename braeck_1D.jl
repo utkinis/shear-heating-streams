@@ -11,17 +11,11 @@ using Printf
     E_R = 1.0 # K
     # non-dimensional parameters
     npow    = 1
-    h_L     = 2e-2
+    h_L     = 5e-2
     T0_E_R  = 2e-2 
     Tbg_E_R = 5e-4
-    σ0_σc   = 1e3
-    τr_τd   = 1e-1
-
-    # h_L     = 0.033
-    # T0_E_R  = 0.0488
-    # Tbg_E_R = 0.0476
-    # σ0_σc   = 1.83 * 2
-    # τr_τd   = 0.027 / 2
+    σ0_σc   = 5e0
+    τr_τd   = 1e-3
     # definitions
     μ0_μbg = exp(1 / T0_E_R - 1 / Tbg_E_R)
     Δp     = h_L + (1.0 - h_L) * μ0_μbg
