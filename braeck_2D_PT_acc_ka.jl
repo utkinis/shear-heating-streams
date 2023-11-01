@@ -19,7 +19,7 @@ CUDA.device!(5)
         ε̇yy = (V.y[ix, iy+1] - V.y[ix, iy]) / dy
         ∇V   = ε̇xx + ε̇yy
         μ_c  = 0.25 * (μ[ix, iy] + μ[ix+1, iy] + μ[ix+1, iy+1] + μ[ix, iy+1])
-        μ_ve = 1 / (1 / (G * dt) + 1 / μ_c)
+        μ_ve = 1.0 / (1.0 / (G * dt) + 1.0 / μ_c)
         # update pressure
         Pr[ix, iy] -= ∇V * μ_ve * (r / θ_dτ)
         # diagonal deviatoric stress
@@ -30,7 +30,7 @@ CUDA.device!(5)
     end
     @inbounds if ix <= nx + 1 && iy <= ny + 1
         ε̇xy = 0.5 * ((V.x[ix, iy] - V.x[ix, iy-1]) / dy + (V.y[ix, iy] - V.y[ix-1, iy]) / dx)
-        μ_ve = 1 / (1 / (G * dt) + 1 / μ[ix, iy])
+        μ_ve = 1.0 / (1.0 / (G * dt) + 1.0 / μ[ix, iy])
         dτxy_dt = (τ.xy[ix, iy] - τ_old.xy[ix, iy]) / dt
         τ.xy[ix, iy] += (-dτxy_dt / G - τ.xy[ix, iy] / μ[ix, iy] + 2.0 * ε̇xy) * μ_ve * dτ_r
     end
@@ -49,7 +49,7 @@ end
     ix, iy = @index(Global, NTuple)
     @inbounds begin
         T_av = 0.25 * (T[ix-1, iy-1] + T[ix, iy-1] + T[ix, iy] + T[ix-1, iy])
-        μ[ix, iy] = (1 / A) * exp(E_R / T_av) * τII[ix, iy]^(1 - npow)
+        μ[ix, iy] = (1.0 / A) * exp(E_R / T_av) * τII[ix, iy]^(1 - npow)
     end
 end
 
@@ -60,14 +60,14 @@ end
                      μ[ix-1, iy+1], μ[ix, iy+1], μ[ix+1, iy+1])
         ∂σxx_∂x = -(Pr[ix, iy] - Pr[ix-1, iy]) / dx + (τ.xx[ix, iy] - τ.xx[ix-1, iy]) / dx
         ∂τxy_∂y = (τ.xy[ix, iy+1] - τ.xy[ix, iy]) / dy
-        V.x[ix, iy] += (∂σxx_∂x + ∂τxy_∂y) * (1 / (G * dt) + 1 / μ_mloc) * nudτ
+        V.x[ix, iy] += (∂σxx_∂x + ∂τxy_∂y) * (1.0 / (G * dt) + 1.0 / μ_mloc) * nudτ
     end
     @inbounds if ix <= nx && iy <= ny + 1
         μ_mloc = max(μ[ix+0, iy-1], μ[ix+0, iy], μ[ix+0, iy+1],
                      μ[ix+1, iy-1], μ[ix+1, iy], μ[ix+1, iy+1])
         ∂σyy_∂y = -(Pr[ix, iy] - Pr[ix, iy-1]) / dy + (τ.yy[ix, iy] - τ.yy[ix, iy-1]) / dy
         ∂τxy_∂x = (τ.xy[ix+1, iy] - τ.xy[ix, iy]) / dx
-        V.y[ix, iy] += (∂σyy_∂y + ∂τxy_∂x) * (1 / (G * dt) + 1 / μ_mloc) * nudτ
+        V.y[ix, iy] += (∂σyy_∂y + ∂τxy_∂x) * (1.0 / (G * dt) + 1.0 / μ_mloc) * nudτ
     end
 end
 
@@ -93,6 +93,14 @@ end
 @kernel function init_T!(T, Tbg, T0, xc, yc, h)
     ix, iy = @index(Global, NTuple)
     @inbounds T[ix, iy] = abs(xc[ix]) <= h / 2 ? T0 : Tbg
+end
+
+@kernel function compute_dσ_dt!(dσ_dt, τII, μ, V, G, dx, dy)
+    ix, iy = @index(Global, NTuple)
+    @inbounds begin
+        ε̇xy = 0.5 * ((V.x[ix, iy] - V.x[ix, iy-1]) / dy + (V.y[ix, iy] - V.y[ix-1, iy]) / dx)
+        dσ_dt[ix, iy] = -G * τII[ix, iy] / μ[ix, iy] + 2.0 * G * ε̇xy
+    end
 end
 
 @kernel function compute_qT!(qT, T, χ, dx, dy, nx, ny)
@@ -139,6 +147,18 @@ end
     ix = @index(Global, Linear)
     @inbounds A[ix, begin] = -A[ix, begin+1]
     @inbounds A[ix, end] = -A[ix, end-1]
+end
+
+@kernel function periodic_bc_x!(A)
+    iy = @index(Global, Linear)
+    @inbounds A[begin, iy] = A[end-1, iy]
+    @inbounds A[end, iy] = A[begin+1, iy]
+end
+
+@kernel function periodic_bc_y!(A)
+    ix = @index(Global, Linear)
+    @inbounds A[ix, begin] = A[ix, end-1]
+    @inbounds A[ix, end] = A[ix, begin+1]
 end
 
 function scalar_field(backend, type, nx, ny)
@@ -190,10 +210,10 @@ end
     Tmaxa = T0_E_R + σ0^2 * Lx / (2 * G * C * h) / E_R
     @show Tmaxa
     # numerics
-    nx     = 511
-    ny     = 511
+    nx     = 255
+    ny     = 255
     niter  = 20min(nx, ny)
-    nvis   = 5
+    nvis   = 1
     ncheck = ceil(Int, 1min(nx, ny))
     ϵtol   = 1e-4
     # preprocessing
@@ -208,8 +228,8 @@ end
     nt      = ceil(Int, ttot / dt)
     # PT params
     r          = 0.9
-    lτ_re_mech = 0.15min(Lx, Ly) / π
-    vdτ        = min(dx, dy) / sqrt(3.1)
+    lτ_re_mech = 0.35min(Lx, Ly) / π
+    vdτ        = min(dx, dy) / sqrt(2.1)
     θ_dτ       = lτ_re_mech * (r + 4 / 3) / vdτ
     nudτ       = vdτ * lτ_re_mech
     dτ_r       = 1.0 / (θ_dτ + 1.0)
@@ -223,6 +243,7 @@ end
     τ     = tensor_field(backend, Float64, nx, ny)
     τ_old = tensor_field(backend, Float64, nx, ny)
     τII   = scalar_field(backend, Float64, nx + 1, ny + 1)
+    dσ_dt = scalar_field(backend, Float64, nx + 1, ny + 1)
     V     = vector_field(backend, Float64, nx, ny)
     μ     = scalar_field(backend, Float64, nx + 1, ny + 1)
     # residuals
@@ -278,29 +299,44 @@ end
         copyto!(parent(τ_old.xx), parent(τ.xx))
         copyto!(parent(τ_old.yy), parent(τ.yy))
         copyto!(parent(τ_old.xy), parent(τ.xy))
-        copyto!(parent(T_old   ), parent(T))
+        copyto!(parent(T_old), parent(T))
         # time step
-        dσ_dt = maximum(abs.(-(A * G) .* parent(τII)[2:end-1,2:end-1] .^ npow .* exp.(-E_R ./ av4(parent(T))) .+ G .* (diff(parent(V.x)[2:end-1,:]; dims=2) ./ dy .+ diff(parent(V.y)[:,2:end-1]; dims=1) ./ dx)))
-        dt = min(1e-4 * σ0 / dσ_dt, dt_diff, 1e-3 * τr)
+        # dσ_dt = maximum(abs.(-(A * G) .* parent(τII)[2:end-1,2:end-1] .^ npow .* exp.(-E_R ./ av4(parent(T))) .+ G .* (diff(parent(V.x)[2:end-1,:]; dims=2) ./ dy .+ diff(parent(V.y)[:,2:end-1]; dims=1) ./ dx)))
+        # dt    = min(1e-3 * σ0 / dσ_dt, dt_diff, 1e-3 * τr)
+        compute_dσ_dt!(backend, 256, (nx + 1, ny + 1))(dσ_dt, τII, μ, V, G, dx, dy)
+        KernelAbstractions.synchronize(backend)
+        dσ_dt_max = maximum(abs.(parent(dσ_dt)))
+        if !isfinite(dσ_dt_max)
+            dσ_dt_max = 1e-2 * σ0 / dt_diff
+        end
+        dt = min(1e-2 * σ0 / dσ_dt_max, dt_diff, 1e-3 * τr)
         # iteration loop
         for iter in 1:niter
             # stress
             compute_τII!(backend, 256, (nx + 1, ny + 1))(τII, τ)
-            neumann_bc_x!(backend, 256, ny + 3)(τII)
-            neumann_bc_y!(backend, 256, nx + 3)(τII)
+            # neumann_bc_x!(backend, 256, ny + 3)(τII)
+            # neumann_bc_y!(backend, 256, nx + 3)(τII)
+            # parent(τII)[:, [1, end]] .= parent(τII)[:, [end - 2, 3]]
             compute_μ!(backend, 256, (nx + 1, ny + 1))(μ, τII, T, A, E_R, npow)
             update_σ!(backend, 256, (nx + 1, ny + 1))(Pr, τ, τ_old, V, μ, G, dt, dτ_r, r, θ_dτ, dx, dy, nx, ny)
+            parent(Pr)[:, [1, end]] .= parent(Pr)[:, [end - 1, 2]]
+            parent(τ.xx)[:, [1, end]] .= parent(τ.xx)[:, [end - 1, 2]]
+            parent(τ.yy)[:, [1, end]] .= parent(τ.yy)[:, [end - 1, 2]]
+            parent(τ.xy)[:, [1, end]] .= parent(τ.xy)[:, [end - 2, 3]]
             # velocity
             update_V!(backend, 256, (nx, ny))(V, Pr, τ, μ, G, dt, nudτ, dx, dy, nx, ny)
             parent(V.x)[[2, nx + 2], :] .= 0.0
-            parent(V.y)[:, [2, ny + 2]] .= 0.0
+            # parent(V.y)[:, [2, ny + 2]] .= 0.0
+            parent(V.y)[:, [1, end]] .= parent(V.y)[:, [end - 2, 3]]
             dirichlet_bc_x!(backend, 256, ny + 2)(V.y)
-            dirichlet_bc_y!(backend, 256, nx + 2)(V.x)
+            parent(V.x)[:, [1, end]] .= parent(V.x)[:, [end - 1, 2]]
+            # dirichlet_bc_y!(backend, 256, nx + 2)(V.x)
             # temperature
             compute_qT!(backend, 256, (nx + 1, ny + 1))(qT, T, χ, dx, dy, nx, ny)
             update_T!(backend, 256, (nx, ny))(T, T_old, qT, τII, μ, C, dt, dx, dy)
             neumann_bc_x!(backend, 256, ny + 2)(T)
-            neumann_bc_y!(backend, 256, nx + 2)(T)
+            # neumann_bc_y!(backend, 256, nx + 2)(T)
+            parent(T)[:, [1, end]] .= parent(T)[:, [end - 1, 2]]
             if iter % ncheck == 0
                 compute_residuals!(backend, 256, (nx + 1, ny + 1))(res_Pr, res_V, Pr, τ, V, dx, dy, nx, ny)
                 parent(res_V.x)[[2, nx + 2], :] .= 0.0
