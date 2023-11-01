@@ -85,9 +85,9 @@ end
     ix, iy = @index(Global, NTuple)
     @inbounds begin
         sh = 0.25 * (τII[ix+0, iy+0]^2 / μ[ix+0, iy+0] +
-                    τII[ix+1, iy+0]^2 / μ[ix+1, iy+0] +
-                    τII[ix+1, iy+1]^2 / μ[ix+1, iy+1] +
-                    τII[ix+0, iy+1]^2 / μ[ix+0, iy+1])
+                     τII[ix+1, iy+0]^2 / μ[ix+1, iy+0] +
+                     τII[ix+1, iy+1]^2 / μ[ix+1, iy+1] +
+                     τII[ix+0, iy+1]^2 / μ[ix+0, iy+1])
         divqT = (qTx[ix+1, iy] - qTx[ix, iy]) / dx + (qTy[ix, iy+1] - qTy[ix, iy]) / dy
         T[ix+1, iy+1] = T_old[ix+1, iy+1] + dt * (-divqT + (1 / C) * sh)
     end
