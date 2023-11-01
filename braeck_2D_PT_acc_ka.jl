@@ -81,7 +81,7 @@ end
     end
 end
 
-@kernel function update_T!(T, qTx, qTy, T_old, τII, μ, C, dt, dx, dy)
+@kernel function update_T!(T, T_old, qTx, qTy, τII, μ, C, dt, dx, dy)
     ix, iy = @index(Global, NTuple)
     sh = 0.25 * (τII[ix+0, iy+0]^2 / μ[ix+0, iy+0] +
                  τII[ix+1, iy+0]^2 / μ[ix+1, iy+0] +
@@ -260,7 +260,7 @@ end
             dirichlet_bc_x!(backend, 256, ny + 2)(Vy)
             # temperature
             compute_qT!(backend, 256, (nx, ny))(qTx, qTy, T, χ, dx, dy)
-            update_T!(backend, 256, (nx, ny))(T, qTx, qTy, T_old, τII, μ, C, dt, dx, dy)
+            update_T!(backend, 256, (nx, ny))(T, T_old, qTx, qTy, τII, μ, C, dt, dx, dy)
             neumann_bc_x!(backend, 256, ny + 2)(T)
             neumann_bc_y!(backend, 256, nx + 2)(T)
             if iter % ncheck == 0
