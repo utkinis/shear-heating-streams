@@ -1,6 +1,10 @@
-using GLMakie
+using CairoMakie
 using Printf
 using LazyArrays
+
+using CUDA
+CUDA.device!(5)
+
 using KernelAbstractions
 
 @views av1(a) = 0.5 .* (a[1:end-1] .+ a[2:end])
