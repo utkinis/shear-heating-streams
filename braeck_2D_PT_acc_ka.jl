@@ -317,8 +317,6 @@ end
                 end
             end
         end
-        # other velocity
-        # cumsum!(Vx[2:end], (σxy.^npow .* exp.(-E_R ./ T) .+ (1 / A / G) .* (σxy .- σxy_old) / dt) .* dx)
         tcur += dt
         it   += 1
         # evolution
@@ -339,14 +337,9 @@ end
             plts.σ_evo[1]    = Point2.(time_evo, σ_evo)
             plts.Tmax_evo[1] = Point2.(time_evo, Tmax_evo)
             plts.Vmax_evo[1] = Point2.(time_evo, Vmax_evo)
-            # autolimits!(axs.T)
             autolimits!(axs.Vy_sl)
-            # autolimits!(axs.σ_evo)
-            # autolimits!(axs.Tmax_evo)
-            # autolimits!(axs.Vmax_evo)
             # save(@sprintf("anim/step_%04d.png", iframe), fig)
             # iframe += 1
-            # yield()
             display(fig)
         end
     end
