@@ -266,8 +266,8 @@ end
             if iter % ncheck == 0
                 ∇V .= Diff(Vx[:, 2:end-1]; dims=1) ./ dx .+ Diff(Vy[2:end-1, :]; dims=2) ./ dy
                 err_Pr = maximum(abs.(∇V)) / (σ0^npow * A * exp(-E_R / T0))
-                err_Vx = maximum(abs.(-Diff(Pr; dims=1) ./ dx .+ Diff(τxx; dims=1) ./ dx .+ Diff(τxy[2:end-1, :]; dims=2) ./ dy)) / σ0 * h
-                err_Vy = maximum(abs.(-Diff(Pr; dims=2) ./ dy .+ Diff(τyy; dims=2) ./ dy .+ Diff(τxy[:, 2:end-1]; dims=1) ./ dx)) / σ0 * h
+                err_Vx = maximum(abs.(.-Diff(Pr; dims=1) ./ dx .+ Diff(τxx; dims=1) ./ dx .+ Diff(τxy[2:end-1, :]; dims=2) ./ dy)) / σ0 * h
+                err_Vy = maximum(abs.(.-Diff(Pr; dims=2) ./ dy .+ Diff(τyy; dims=2) ./ dy .+ Diff(τxy[:, 2:end-1]; dims=1) ./ dx)) / σ0 * h
                 @printf("  iter / nx = %.1f, err: [Pr = %1.3e, Vx = %1.3e; Vy = %1.3e]\n", iter / nx, err_Pr, err_Vx, err_Vy)
                 if !isfinite(err_Pr) || !isfinite(err_Vx) || !isfinite(err_Vy)
                     error("simulation failed")
