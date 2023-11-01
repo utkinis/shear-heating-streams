@@ -79,7 +79,10 @@ end
 
 @kernel function update_T!(T, qTx, qTy, T_old, τII, μ, C, dt, dx, dy)
     ix, iy = @index(Global, NTuple)
-    sh = 0.25 * (τII[ix, iy]^2 / μ[ix, iy] + τII[ix+1, iy]^2 / μ[ix+1, iy] + τII[ix+1, iy+1]^2 / μ[ix+1, iy+1] + τII[ix, iy+1]^2 / μ[ix, iy+1])
+    sh = 0.25 * (τII[ix+0, iy+0]^2 / μ[ix+0, iy+0] +
+                 τII[ix+1, iy+0]^2 / μ[ix+1, iy+0] +
+                 τII[ix+1, iy+1]^2 / μ[ix+1, iy+1] +
+                 τII[ix+0, iy+1]^2 / μ[ix+0, iy+1])
     divqT = (qTx[ix+1, iy] - qTx[ix, iy]) / dx + (qTy[ix, iy+1] - qTy[ix, iy]) / dy
     T[ix+1, iy+1] = T_old[ix+1, iy+1] + dt * (-divqT + (1 / C) * sh)
 end
@@ -144,7 +147,7 @@ end
     nx     = 200
     ny     = 200
     niter  = 20min(nx, ny)
-    nvis   = 1
+    nvis   = 5
     ncheck = ceil(Int, 1min(nx, ny))
     ϵtol   = 1e-4
     # preprocessing
