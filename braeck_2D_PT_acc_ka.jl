@@ -1,11 +1,8 @@
-using CairoMakie
-using Printf
+using OffsetArrays, Printf, KernelAbstractions, CairoMakie
 
 using CUDA
 CUDA.allowscalar(false)
 CUDA.device!(5)
-
-using KernelAbstractions
 
 @views av1(a) = 0.5 .* (a[1:end-1] .+ a[2:end])
 @views avx(a) = 0.5 .* (a[1:end-1, :] .+ a[2:end, :])
@@ -115,6 +112,22 @@ end
     ix = @index(Global, Linear)
     @inbounds A[ix, 1] = -A[ix, 2]
     @inbounds A[ix, end] = -A[ix, end-1]
+end
+
+function scalar_field(backend, type, nx, ny)
+    field = KernelAbstractions.zeros(backend, type, nx + 2, ny + 2)
+    return OffsetArray(field, -1, -1)
+end
+
+function vector_field(backend, type, nx, ny)
+    return (x = scalar_field(backend, type, nx + 1, ny),
+            y = scalar_field(backend, type, nx, ny + 1))
+end
+
+function tensor_field(backend, type, nx, ny)
+    return (xx = scalar_field(backend, type, nx, ny),
+            yy = scalar_field(backend, type, nx, ny),
+            xy = scalar_field(backend, type, nx + 1, ny + 1))
 end
 
 @views function braeck_2D(backend)
