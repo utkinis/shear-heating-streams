@@ -1,8 +1,8 @@
 using CairoMakie
 using Printf
-using LazyArrays
 
 using CUDA
+CUDA.allowscalar(false)
 CUDA.device!(5)
 
 using KernelAbstractions
@@ -73,22 +73,24 @@ end
 
 @kernel function compute_qT!(qTx, qTy, T, χ, dx, dy)
     ix, iy = @index(Global, NTuple)
-    if ix <= size(qTx, 1) - 2 && iy <= size(qTx, 2)
+    @inbounds if ix <= size(qTx, 1) - 2 && iy <= size(qTx, 2)
         qTx[ix+1, iy] = -χ * (T[ix+2, iy+1] - T[ix+1, iy+1]) / dx
     end
-    if ix <= size(qTy, 1) && iy <= size(qTy, 2) - 2
+    @inbounds if ix <= size(qTy, 1) && iy <= size(qTy, 2) - 2
         qTy[ix, iy+1] = -χ * (T[ix+1, iy+2] - T[ix+1, iy+1]) / dy
     end
 end
 
 @kernel function update_T!(T, T_old, qTx, qTy, τII, μ, C, dt, dx, dy)
     ix, iy = @index(Global, NTuple)
-    sh = 0.25 * (τII[ix+0, iy+0]^2 / μ[ix+0, iy+0] +
-                 τII[ix+1, iy+0]^2 / μ[ix+1, iy+0] +
-                 τII[ix+1, iy+1]^2 / μ[ix+1, iy+1] +
-                 τII[ix+0, iy+1]^2 / μ[ix+0, iy+1])
-    divqT = (qTx[ix+1, iy] - qTx[ix, iy]) / dx + (qTy[ix, iy+1] - qTy[ix, iy]) / dy
-    T[ix+1, iy+1] = T_old[ix+1, iy+1] + dt * (-divqT + (1 / C) * sh)
+    @inbounds begin
+        sh = 0.25 * (τII[ix+0, iy+0]^2 / μ[ix+0, iy+0] +
+                    τII[ix+1, iy+0]^2 / μ[ix+1, iy+0] +
+                    τII[ix+1, iy+1]^2 / μ[ix+1, iy+1] +
+                    τII[ix+0, iy+1]^2 / μ[ix+0, iy+1])
+        divqT = (qTx[ix+1, iy] - qTx[ix, iy]) / dx + (qTy[ix, iy+1] - qTy[ix, iy]) / dy
+        T[ix+1, iy+1] = T_old[ix+1, iy+1] + dt * (-divqT + (1 / C) * sh)
+    end
 end
 
 @kernel function neumann_bc_x!(A)
@@ -148,8 +150,8 @@ end
     Tmaxa = T0_E_R + σ0^2 * Lx / (2 * G * C * h) / E_R
     @show Tmaxa
     # numerics
-    nx     = 200
-    ny     = 200
+    nx     = 511
+    ny     = 511
     niter  = 20min(nx, ny)
     nvis   = 5
     ncheck = ceil(Int, 1min(nx, ny))
@@ -173,23 +175,23 @@ end
     dτ_r       = 1.0 / (θ_dτ + 1.0)
     # fields
     # thermo
-    T     = zeros(nx + 2, ny + 2)
-    T_old = zeros(nx + 2, ny + 2)
-    qTx   = zeros(nx + 1, ny)
-    qTy   = zeros(nx, ny + 1)
+    T     = KernelAbstractions.zeros(backend, Float64, nx + 2, ny + 2)
+    T_old = KernelAbstractions.zeros(backend, Float64, nx + 2, ny + 2)
+    qTx   = KernelAbstractions.zeros(backend, Float64, nx + 1, ny)
+    qTy   = KernelAbstractions.zeros(backend, Float64, nx, ny + 1)
     # mechanics
-    Pr      = zeros(nx, ny)
-    τxx     = zeros(nx, ny)
-    τyy     = zeros(nx, ny)
-    τxy     = zeros(nx + 1, ny + 1)
-    τII     = zeros(nx + 1, ny + 1)
-    τxx_old = zeros(nx, ny)
-    τyy_old = zeros(nx, ny)
-    τxy_old = zeros(nx + 1, ny + 1)
-    Vx      = zeros(nx + 1, ny + 2)
-    Vy      = zeros(nx + 2, ny + 1)
-    ∇V      = zeros(nx, ny)
-    μ       = zeros(nx + 1, ny + 1)
+    Pr      = KernelAbstractions.zeros(backend, Float64, nx, ny)
+    τxx     = KernelAbstractions.zeros(backend, Float64, nx, ny)
+    τyy     = KernelAbstractions.zeros(backend, Float64, nx, ny)
+    τxy     = KernelAbstractions.zeros(backend, Float64, nx + 1, ny + 1)
+    τII     = KernelAbstractions.zeros(backend, Float64, nx + 1, ny + 1)
+    τxx_old = KernelAbstractions.zeros(backend, Float64, nx, ny)
+    τyy_old = KernelAbstractions.zeros(backend, Float64, nx, ny)
+    τxy_old = KernelAbstractions.zeros(backend, Float64, nx + 1, ny + 1)
+    Vx      = KernelAbstractions.zeros(backend, Float64, nx + 1, ny + 2)
+    Vy      = KernelAbstractions.zeros(backend, Float64, nx + 2, ny + 1)
+    ∇V      = KernelAbstractions.zeros(backend, Float64, nx, ny)
+    μ       = KernelAbstractions.zeros(backend, Float64, nx + 1, ny + 1)
     # initialisation
     broadcast!(T[2:end-1, 2:end-1], xc, yc') do x, y
         abs(x) <= h / 2 ? T0 : Tbg
@@ -219,11 +221,11 @@ end
            σ_evo    = Axis(gl[2, 1]; xlabel=L"t/\tau_r", ylabel=L"\sigma/\sigma_0"),
            Tmax_evo = Axis(gl[3, 1]; xlabel=L"t/\tau_r", ylabel=L"T_\mathrm{max}/(E/R)", yscale=log10),
            Vmax_evo = Axis(gl[4, 1]; xlabel=L"t/\tau_r", ylabel=L"V_\mathrm{max}/(\sigma_0 h/\mu_0)", yscale=log10))
-    plts = (T        = heatmap!(axs.T, xc, yc, T[2:end-1, 2:end-1] ./ E_R; colormap=:turbo),
-            T_ini_sl = lines!(axs.T_sl, Point2.(xc ./ h, T[2:end-1, ny÷2] ./ E_R); linewidth=4),
-            T_sl     = lines!(axs.T_sl, Point2.(xc ./ h, T[2:end-1, ny÷2] ./ E_R); linewidth=4),
+    plts = (T        = heatmap!(axs.T, xc, yc, Array(T[2:end-1, 2:end-1] ./ E_R); colormap=:turbo),
+            T_ini_sl = lines!(axs.T_sl, Point2.(xc ./ h, Array(T[2:end-1, ny÷2] ./ E_R)); linewidth=4),
+            T_sl     = lines!(axs.T_sl, Point2.(xc ./ h, Array(T[2:end-1, ny÷2] ./ E_R)); linewidth=4),
             Tmaxa    = hlines!(axs.T_sl, Tmaxa; linewidth=4, color=:gray, linestyle=:dash),
-            Vy_sl    = lines!(axs.Vy_sl, Point2.(xc ./ h, Vy[2:end-1, ny÷2]); linewidth=4),
+            Vy_sl    = lines!(axs.Vy_sl, Point2.(xc ./ h, Array(Vy[2:end-1, ny÷2])); linewidth=4),
             σ_evo    = lines!(axs.σ_evo, Point2.(time_evo, maximum(τxy) / σ0); linewidth=4),
             Tmax_evo = lines!(axs.Tmax_evo, Point2.(time_evo, Tmax_evo ./ E_R); linewidth=4),
             Vmax_evo = lines!(axs.Vmax_evo, Point2.(time_evo, Vmax_evo); linewidth=4))
@@ -244,7 +246,7 @@ end
         τxy_old .= τxy
         T_old .= T
         # time step
-        dσ_dt = maximum(abs.(-(A * G) .* τII .^ npow .* exp.(-E_R ./ av4(T)) .+ G .* (Diff(Vx; dims=2) ./ dy .+ Diff(Vy; dims=1) ./ dx)))
+        dσ_dt = maximum(abs.(-(A * G) .* τII .^ npow .* exp.(-E_R ./ av4(T)) .+ G .* (diff(Vx; dims=2) ./ dy .+ diff(Vy; dims=1) ./ dx)))
         dt = min(1e-4 * σ0 / dσ_dt, dt_diff, 1e-3 * τr)
         # iteration loop
         for iter in 1:niter
@@ -264,10 +266,10 @@ end
             neumann_bc_x!(backend, 256, ny + 2)(T)
             neumann_bc_y!(backend, 256, nx + 2)(T)
             if iter % ncheck == 0
-                ∇V .= Diff(Vx[:, 2:end-1]; dims=1) ./ dx .+ Diff(Vy[2:end-1, :]; dims=2) ./ dy
+                ∇V .= diff(Vx[:, 2:end-1]; dims=1) ./ dx .+ diff(Vy[2:end-1, :]; dims=2) ./ dy
                 err_Pr = maximum(abs.(∇V)) / (σ0^npow * A * exp(-E_R / T0))
-                err_Vx = maximum(abs.(.-Diff(Pr; dims=1) ./ dx .+ Diff(τxx; dims=1) ./ dx .+ Diff(τxy[2:end-1, :]; dims=2) ./ dy)) / σ0 * h
-                err_Vy = maximum(abs.(.-Diff(Pr; dims=2) ./ dy .+ Diff(τyy; dims=2) ./ dy .+ Diff(τxy[:, 2:end-1]; dims=1) ./ dx)) / σ0 * h
+                err_Vx = maximum(abs.(.-diff(Pr; dims=1) ./ dx .+ diff(τxx; dims=1) ./ dx .+ diff(τxy[2:end-1, :]; dims=2) ./ dy)) / σ0 * h
+                err_Vy = maximum(abs.(.-diff(Pr; dims=2) ./ dy .+ diff(τyy; dims=2) ./ dy .+ diff(τxy[:, 2:end-1]; dims=1) ./ dx)) / σ0 * h
                 @printf("  iter / nx = %.1f, err: [Pr = %1.3e, Vx = %1.3e; Vy = %1.3e]\n", iter / nx, err_Pr, err_Vx, err_Vy)
                 if !isfinite(err_Pr) || !isfinite(err_Vx) || !isfinite(err_Vy)
                     error("simulation failed")
@@ -293,9 +295,9 @@ end
         # visualisation
         if it % nvis == 0
             # plots
-            plts.T[3]        = T[2:end-1, 2:end-1] ./ E_R
-            plts.T_sl[1]     = Point2.(xc ./ h, T[2:end-1, ny÷2] ./ E_R)
-            plts.Vy_sl[1]    = Point2.(xc ./ h, Vy[2:end-1, ny÷2])
+            plts.T[3]        = Array(T[2:end-1, 2:end-1] ./ E_R)
+            plts.T_sl[1]     = Point2.(xc ./ h, Array(T[2:end-1, ny÷2] ./ E_R))
+            plts.Vy_sl[1]    = Point2.(xc ./ h, Array(Vy[2:end-1, ny÷2]))
             plts.σ_evo[1]    = Point2.(time_evo, σ_evo)
             plts.Tmax_evo[1] = Point2.(time_evo, Tmax_evo)
             plts.Vmax_evo[1] = Point2.(time_evo, Vmax_evo)
@@ -306,7 +308,8 @@ end
             # autolimits!(axs.Vmax_evo)
             # save(@sprintf("anim/step_%04d.png", iframe), fig)
             # iframe += 1
-            yield()
+            # yield()
+            display(fig)
         end
     end
     @show (maximum(Tmax_evo) - T0_E_R) / (Tmaxa - T0_E_R)
@@ -314,4 +317,4 @@ end
     return
 end
 
-braeck_2D(CPU())
+braeck_2D(CUDABackend())
