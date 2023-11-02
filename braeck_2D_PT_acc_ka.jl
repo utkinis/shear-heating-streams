@@ -36,18 +36,12 @@ CUDA.device!(5)
     end
 end
 
-@kernel function compute_τII!(τII, τ)
+@kernel function compute_τII_μ!(τII, μ, τ, T, A, E_R, npow)
     ix, iy = @index(Global, NTuple)
     @inbounds begin
         τxx_av = 0.25 * (τ.xx[ix-1, iy-1] + τ.xx[ix, iy-1] + τ.xx[ix, iy] + τ.xx[ix-1, iy])
         τyy_av = 0.25 * (τ.yy[ix-1, iy-1] + τ.yy[ix, iy-1] + τ.yy[ix, iy] + τ.yy[ix-1, iy])
         τII[ix, iy] = sqrt(0.5 * (τxx_av^2 + τyy_av^2) + τ.xy[ix, iy]^2)
-    end
-end
-
-@kernel function compute_μ!(μ, τII, T, A, E_R, npow)
-    ix, iy = @index(Global, NTuple)
-    @inbounds begin
         T_av = 0.25 * (T[ix-1, iy-1] + T[ix, iy-1] + T[ix, iy] + T[ix-1, iy])
         μ[ix, iy] = (1.0 / A) * exp(E_R / T_av) * τII[ix, iy]^(1 - npow)
     end
@@ -92,7 +86,7 @@ end
 
 @kernel function init_T!(T, Tbg, T0, xc, yc, h)
     ix, iy = @index(Global, NTuple)
-    @inbounds T[ix, iy] = abs(xc[ix]) <= h / 2 ? T0 : Tbg
+    @inbounds T[ix, iy] = (abs(xc[ix]) <= h / 2 && abs(yc[iy]) <= h / 2) ? T0 : Tbg
 end
 
 @kernel function compute_dσ_dt!(dσ_dt, τII, μ, V, G, dx, dy)
@@ -103,7 +97,7 @@ end
     end
 end
 
-@kernel function compute_qT!(qT, T, χ, dx, dy, nx, ny)
+@kernel function compute_qT_divfT!(qT, T, χ, divfT, V, dx, dy, nx, ny)
     ix, iy = @index(Global, NTuple)
     @inbounds if ix <= nx + 1 && iy <= ny
         qT.x[ix, iy] = -χ * (T[ix, iy] - T[ix-1, iy]) / dx
@@ -111,9 +105,16 @@ end
     @inbounds if ix <= nx && iy <= ny + 1
         qT.y[ix, iy] = -χ * (T[ix, iy] - T[ix, iy-1]) / dy
     end
+    @inbounds if ix <= nx && iy <= ny
+        Fe = max(V.x[ix+0, iy+0], 0.0) * T[ix-1, iy+0] + min(V.x[ix+0, iy+0], 0.0) * T[ix+0, iy+0]
+        Fw = max(V.x[ix+1, iy+0], 0.0) * T[ix+0, iy+0] + min(V.x[ix+1, iy+0], 0.0) * T[ix+1, iy+0]
+        Fs = max(V.y[ix+0, iy+0], 0.0) * T[ix+0, iy-1] + min(V.y[ix+0, iy+0], 0.0) * T[ix+0, iy+0]
+        Fn = max(V.y[ix+0, iy+1], 0.0) * T[ix+0, iy+0] + min(V.y[ix+0, iy+1], 0.0) * T[ix+0, iy+1]
+        divfT[ix, iy] = (Fw - Fe) / dx + (Fn - Fs) / dy
+    end
 end
 
-@kernel function update_T!(T, T_old, qT, τII, μ, C, dt, dx, dy)
+@kernel function update_T!(T, T_old, qT, τII, μ, divfT, C, dt, dx, dy)
     ix, iy = @index(Global, NTuple)
     @inbounds begin
         sh = 0.25 * (τII[ix+0, iy+0]^2 / μ[ix+0, iy+0] +
@@ -121,7 +122,7 @@ end
                      τII[ix+1, iy+1]^2 / μ[ix+1, iy+1] +
                      τII[ix+0, iy+1]^2 / μ[ix+0, iy+1])
         divqT = (qT.x[ix+1, iy] - qT.x[ix, iy]) / dx + (qT.y[ix, iy+1] - qT.y[ix, iy]) / dy
-        T[ix, iy] = T_old[ix, iy] + dt * (-divqT + (1 / C) * sh)
+        T[ix, iy] = T_old[ix, iy] + dt * (-divqT - divfT[ix, iy] + (1 / C) * sh)
     end
 end
 
@@ -152,13 +153,18 @@ end
 @kernel function dirichlet_bc_x2!(A)
     iy = @index(Global, Linear)
     @inbounds A[begin+1, iy] = 0.0
-    @inbounds A[end-1, iy] = 0
+    @inbounds A[end-1, iy] = 0.0
 end
 
 @kernel function dirichlet_bc_y2!(A)
     ix = @index(Global, Linear)
     @inbounds A[ix, begin+1] = 0.0
     @inbounds A[ix, end-1] = 0.0
+end
+
+@kernel function dirichlet_bc_y2_bottom!(A)
+    ix = @index(Global, Linear)
+    @inbounds A[ix, begin+1] = 0.0
 end
 
 @kernel function periodic_bc_x!(A)
@@ -217,14 +223,15 @@ end
     τr  = 1.0 # s
     E_R = 1.0 # K
     # non-dimensional parameters
-    npow    = 3
+    npow    = 1
     h_Lx    = 5e-2
     h_Ly    = 5e-2
-    T0_E_R  = 2e-2
-    Tbg_E_R = 5e-4
-    σ0_σc   = 5e0
-    τr_τd   = 1e-3
-    G_σ0    = 1.0
+    T0_E_R  = 0.05
+    Tbg_E_R = 0.04
+    # σ0_σc   = 5e0
+    σ0_σc = 1e1
+    τr_τd = 1e-3
+    G_σc  = 10.0
     # definitions
     μ0_μbg = exp(1 / T0_E_R - 1 / Tbg_E_R)
     Δp     = h_Lx + (1.0 - h_Lx) * μ0_μbg
@@ -237,14 +244,14 @@ end
     T0    = T0_E_R * E_R
     Tbg   = Tbg_E_R * E_R
     χ     = h^2 / τd
-    G     = G_σ0 * σ0
+    G     = G_σc * σc
     A     = exp(E_R / T0) * σ0^(1 - npow) / (2 * G * Δp * τr)
     C     = (σc / T0)^2 / (2 * G * Δp) * E_R
     Tmaxa = T0_E_R + σ0^2 * Lx / (2 * G * C * h) / E_R
     @show Tmaxa
     # numerics
-    nx     = 511
-    ny     = 511
+    nx     = 1023
+    ny     = 1023
     niter  = 20min(nx, ny)
     nvis   = 5
     ncheck = ceil(Int, 1min(nx, ny))
@@ -270,6 +277,7 @@ end
     # thermo
     T     = scalar_field(backend, Float64, nx, ny)
     T_old = scalar_field(backend, Float64, nx, ny)
+    divfT = scalar_field(backend, Float64, nx, ny)
     qT    = vector_field(backend, Float64, nx, ny)
     # mechanics
     Pr    = scalar_field(backend, Float64, nx, ny)
@@ -285,11 +293,15 @@ end
     # initialisation
     init_T!(backend, 256, (nx, ny))(T, Tbg, T0, xc, yc, h)
     neumann_bc_x!(backend, 256, ny + 2)(T)
-    periodic_bc_y!(backend, 256, nx + 2)(T)
-    τ.xy .= σ0
-    compute_τII!(backend, 256, (nx + 1, ny + 1))(τII, τ)
+    neumann_bc_y!(backend, 256, nx + 2)(T)
+    # τ.xy .= σ0
+    τ.xx .= -σ0 / 2
+    τ.yy .=  σ0 / 2
+    compute_τII_μ!(backend, 256, (nx + 1, ny + 1))(τII, μ, τ, T, A, E_R, npow)
     neumann_bc_x!(backend, 256, ny + 3)(τII)
-    periodic_bc_y2!(backend, 256, nx + 3)(τII)
+    neumann_bc_y!(backend, 256, nx + 3)(τII)
+    neumann_bc_x!(backend, 256, ny + 3)(μ)
+    neumann_bc_y!(backend, 256, nx + 3)(μ)
     # temporal evolution
     time_evo = Float64[0.0]
     Tmax_evo = Float64[maximum(parent(T))/E_R]
@@ -300,32 +312,38 @@ end
     sizehint!(σ_evo, nt + 1)
     sizehint!(Vmax_evo, nt + 1)
     # figures
-    fig      = Figure(; resolution=(1200, 1000), fontsize=26)
+    fig      = Figure(; resolution=(1800, 1000), fontsize=26)
     gl_col   = fig[1, 1] = GridLayout()
     gl_maps  = gl_col[1, 1] = GridLayout()
     gl_lines = gl_col[1, 2] = GridLayout()
-    colsize!(gl_col, 1, Relative(0.4))
-    axs      = (T        = Axis(gl_maps[1, 1][1, 1]; xlabel=L"x/h", ylabel=L"y/h", title=L"T/(E/R)", aspect=DataAspect()),
-    Vx       = Axis(gl_maps[2, 1][1, 1]; xlabel=L"x/h", ylabel=L"y/h", title=L"v_x", aspect=DataAspect()),
-    Vy       = Axis(gl_maps[3, 1][1, 1]; xlabel=L"x/h", ylabel=L"y/h", title=L"v_y", aspect=DataAspect()),
-    T_sl     = Axis(gl_lines[1, 1]; xlabel=L"x/h", ylabel=L"T/(E/R)", yscale=log10),
-    Vy_sl    = Axis(gl_lines[2, 1]; xlabel=L"x/h", ylabel=L"v_y"),
-    σ_evo    = Axis(gl_lines[3, 1]; xlabel=L"t/\tau_r", ylabel=L"\sigma/\sigma_0"),
-    Tmax_evo = Axis(gl_lines[4, 1]; xlabel=L"t/\tau_r", ylabel=L"T_\mathrm{max}/(E/R)", yscale=log10),
-    Vmax_evo = Axis(gl_lines[5, 1]; xlabel=L"t/\tau_r", ylabel=L"V_\mathrm{max}/(\sigma_0 h/\mu_0)", yscale=log10))
-    plts     = (T        = heatmap!(axs.T, xc, yc, Array(interior(T) ./ E_R); colormap=:turbo),
-    Vx       = heatmap!(axs.Vx, xv, yc, Array(interior(V.x)); colormap=:turbo),
-    Vy       = heatmap!(axs.Vy, xc, yv, Array(interior(V.y)); colormap=:turbo),
-    T_ini_sl = lines!(axs.T_sl, Point2.(xc ./ h, Array(interior(T, :, ny ÷ 2) ./ E_R)); linewidth=4),
-    T_sl     = lines!(axs.T_sl, Point2.(xc ./ h, Array(interior(T, :, ny ÷ 2) ./ E_R)); linewidth=4),
-    Tmaxa    = hlines!(axs.T_sl, Tmaxa; linewidth=4, color=:gray, linestyle=:dash),
-    Vy_sl    = lines!(axs.Vy_sl, Point2.(xc ./ h, Array(interior(V.y, :, ny ÷ 2))); linewidth=4),
-    σ_evo    = lines!(axs.σ_evo, Point2.(time_evo, maximum(interior(τ.xy)) / σ0); linewidth=4),
-    Tmax_evo = lines!(axs.Tmax_evo, Point2.(time_evo, Tmax_evo ./ E_R); linewidth=4),
-    Vmax_evo = lines!(axs.Vmax_evo, Point2.(time_evo, Vmax_evo); linewidth=4))
+    colsize!(gl_col, 1, Relative(0.65))
+    # axes and plots
+    axs = (T        = Axis(gl_maps[1, 1][1, 1]; xlabel=L"x/h", ylabel=L"y/h", title=L"T/(E/R)", aspect=DataAspect()),
+           τII      = Axis(gl_maps[2, 1][1, 1]; xlabel=L"x/h", ylabel=L"y/h", title=L"\tau_\mathrm{II}", aspect=DataAspect()),
+           Vx       = Axis(gl_maps[1, 2][1, 1]; xlabel=L"x/h", ylabel=L"y/h", title=L"v_x", aspect=DataAspect()),
+           Vy       = Axis(gl_maps[2, 2][1, 1]; xlabel=L"x/h", ylabel=L"y/h", title=L"v_y", aspect=DataAspect()),
+           T_sl     = Axis(gl_lines[1, 1]; xlabel=L"x/h", ylabel=L"T/(E/R)", yscale=log10),
+           Vy_sl    = Axis(gl_lines[2, 1]; xlabel=L"x/h", ylabel=L"v_y"),
+           σ_evo    = Axis(gl_lines[3, 1]; xlabel=L"t/\tau_r", ylabel=L"\sigma/\sigma_0"),
+           Tmax_evo = Axis(gl_lines[4, 1]; xlabel=L"t/\tau_r", ylabel=L"T_\mathrm{max}/(E/R)", yscale=log10),
+           Vmax_evo = Axis(gl_lines[5, 1]; xlabel=L"t/\tau_r", ylabel=L"V_\mathrm{max}/(\sigma_0 h/\mu_0)", yscale=log10))
+    plts = (T        = heatmap!(axs.T, xc, yc, Array(interior(T) ./ E_R); colormap=:turbo),
+            τII      = heatmap!(axs.τII, xv, yv, Array(interior(τII)); colormap=:turbo),
+            Vx       = heatmap!(axs.Vx, xv, yc, Array(interior(V.x)); colormap=:turbo),
+            Vy       = heatmap!(axs.Vy, xc, yv, Array(interior(V.y)); colormap=:turbo),
+            T_ini_sl = lines!(axs.T_sl, Point2.(xc ./ h, Array(interior(T, :, ny ÷ 2) ./ E_R)); linewidth=4),
+            T_sl     = lines!(axs.T_sl, Point2.(xc ./ h, Array(interior(T, :, ny ÷ 2) ./ E_R)); linewidth=4),
+            Tmaxa    = hlines!(axs.T_sl, Tmaxa; linewidth=4, color=:gray, linestyle=:dash),
+            Vy_sl    = lines!(axs.Vy_sl, Point2.(xc ./ h, Array(interior(V.y, :, ny ÷ 2))); linewidth=4),
+            σ_evo    = lines!(axs.σ_evo, Point2.(time_evo, maximum(interior(τ.xy)) / σ0); linewidth=4),
+            Tmax_evo = lines!(axs.Tmax_evo, Point2.(time_evo, Tmax_evo ./ E_R); linewidth=4),
+            Vmax_evo = lines!(axs.Vmax_evo, Point2.(time_evo, Vmax_evo); linewidth=4))
+    # colorbars
     Colorbar(gl_maps[1, 1][1, 2], plts.T)
-    Colorbar(gl_maps[2, 1][1, 2], plts.Vx)
-    Colorbar(gl_maps[3, 1][1, 2], plts.Vy)
+    Colorbar(gl_maps[2, 1][1, 2], plts.τII)
+    Colorbar(gl_maps[1, 2][1, 2], plts.Vx)
+    Colorbar(gl_maps[2, 2][1, 2], plts.Vy)
+    # axis limits
     limits!(axs.T_sl, -2, 2, 0.5Tbg_E_R, 2Tmaxa)
     limits!(axs.Vy_sl, -2, 2, -5e3, 5e3)
     limits!(axs.σ_evo, 0.0, ttot / τr, 0.0, 1.0)
@@ -347,41 +365,42 @@ end
         KernelAbstractions.synchronize(backend)
         dσ_dt_max = maximum(abs.(interior(dσ_dt)))
         if !isfinite(dσ_dt_max)
-            dσ_dt_max = 1e-3 * σ0 / dt_diff
+            dσ_dt_max = 1e-4 * σ0 / dt_diff
         end
-        dt = min(1e-3 * σ0 / dσ_dt_max, dt_diff, 1e-3 * τr)
+        dt_adv = min(dx / maximum(abs.(interior(V.x))),
+                     dy / maximum(abs.(interior(V.y)))) / 2.1
+        dt = min(1e-4 * σ0 / dσ_dt_max, dt_diff, 1e-3 * τr, dt_adv)
         # iteration loop
         for iter in 1:niter
             # rheology
-            compute_τII!(backend, 256, (nx + 1, ny + 1))(τII, τ)
+            compute_τII_μ!(backend, 256, (nx + 1, ny + 1))(τII, μ, τ, T, A, E_R, npow)
             neumann_bc_x!(backend, 256, ny + 3)(τII)
-            periodic_bc_y!(backend, 256, nx + 3)(τII)
-            compute_μ!(backend, 256, (nx + 1, ny + 1))(μ, τII, T, A, E_R, npow)
+            neumann_bc_y!(backend, 256, nx + 3)(τII)
             neumann_bc_x!(backend, 256, ny + 3)(μ)
-            periodic_bc_y!(backend, 256, nx + 3)(μ)
+            neumann_bc_y!(backend, 256, nx + 3)(μ)
             # stress
             update_σ!(backend, 256, (nx + 1, ny + 1))(Pr, τ, τ_old, V, μ, G, dt, dτ_r, r, θ_dτ, dx, dy, nx, ny)
-            periodic_bc_y!(backend, 256, nx + 2)(Pr)
-            periodic_bc_y!(backend, 256, nx + 2)(τ.xx)
-            periodic_bc_y!(backend, 256, nx + 2)(τ.yy)
-            periodic_bc_y2!(backend, 256, nx + 3)(τ.xy)
+            # dirichlet_bc_x2!(backend, 256, ny + 3)(τ.xy)
+            # dirichlet_bc_y2!(backend, 256, nx + 3)(τ.xy)
             # velocity
             update_V!(backend, 256, (nx + 1, ny + 1))(V, Pr, τ, μ, G, dt, nudτ, dx, dy, nx, ny)
             dirichlet_bc_x2!(backend, 256, ny + 2)(V.x)
-            periodic_bc_y!(backend, 256, nx + 3)(V.x)
-            dirichlet_bc_x!(backend, 256, ny + 2)(V.y)
+            neumann_bc_y!(backend, 256, nx + 3)(V.x)
+            neumann_bc_x!(backend, 256, ny + 3)(V.y)
+            # dirichlet_bc_y2!(backend, 256, nx + 2)(V.y)
+            # dirichlet_bc_y2_bottom!(backend, 256, ny + 2)(V.y)
             # temperature
-            compute_qT!(backend, 256, (nx + 1, ny + 1))(qT, T, χ, dx, dy, nx, ny)
-            update_T!(backend, 256, (nx, ny))(T, T_old, qT, τII, μ, C, dt, dx, dy)
+            compute_qT_divfT!(backend, 256, (nx + 1, ny + 1))(qT, T, χ, divfT, V, dx, dy, nx, ny)
+            update_T!(backend, 256, (nx, ny))(T, T_old, qT, τII, μ, divfT, C, dt, dx, dy)
             neumann_bc_x!(backend, 256, ny + 2)(T)
-            periodic_bc_y!(backend, 256, nx + 2)(T)
+            neumann_bc_y!(backend, 256, nx + 2)(T)
             if iter % ncheck == 0
                 compute_residuals!(backend, 256, (nx + 1, ny + 1))(res_Pr, res_V, Pr, τ, V, dx, dy, nx, ny)
                 dirichlet_bc_x2!(backend, 256, ny + 2)(res_V.x)
                 dirichlet_bc_y2!(backend, 256, nx + 2)(res_V.y)
-                err_Pr = maximum(abs.(parent(res_Pr))) / (σ0^npow * A * exp(-E_R / T0))
-                err_Vx = maximum(abs.(parent(res_V.x))) / σ0 * h
-                err_Vy = maximum(abs.(parent(res_V.y))) / σ0 * h
+                err_Pr = maximum(abs.(interior(res_Pr))) / (σ0^npow * A * exp(-E_R / T0))
+                err_Vx = maximum(abs.(interior(res_V.x))) / σ0 * h
+                err_Vy = maximum(abs.(interior(res_V.y))) / σ0 * h
                 @printf("  iter / nx = %.1f, err: [Pr = %1.3e, Vx = %1.3e; Vy = %1.3e]\n", iter / nx, err_Pr, err_Vx, err_Vy)
                 if !isfinite(err_Pr) || !isfinite(err_Vx) || !isfinite(err_Vy)
                     error("simulation failed")
@@ -395,9 +414,9 @@ end
         it   += 1
         # evolution
         push!(time_evo, tcur / τr)
-        push!(Tmax_evo, maximum(parent(T)) / E_R)
-        push!(Vmax_evo, maximum(parent(V.y)) / (σ0^npow * h * A * exp(-E_R / T0)))
-        push!(σ_evo, maximum(parent(τII)) / σ0)
+        push!(Tmax_evo, maximum(interior(T)) / E_R)
+        push!(Vmax_evo, maximum(interior(V.y)) / (σ0^npow * h * A * exp(-E_R / T0)))
+        push!(σ_evo, maximum(interior(τII)) / σ0)
         # convergence check
         if any(.!isfinite.(parent(T))) || any(.!isfinite.(parent(τII)))
             error("simulation failed")
@@ -406,6 +425,7 @@ end
         if it % nvis == 0
             # plots
             plts.T[3]        = Array(interior(T) ./ E_R)
+            plts.τII[3]      = Array(interior(τII))
             plts.Vx[3]       = Array(interior(V.x))
             plts.Vy[3]       = Array(interior(V.y))
             plts.T_sl[1]     = Point2.(xc ./ h, Array(parent(T)[2:end-1, ny÷2] ./ E_R))
