@@ -10,7 +10,7 @@ using Printf
     τr  = 1.0 # s
     E_R = 1.0 # K
     # non-dimensional parameters
-    npow    = 1
+    npow    = 4
     h_L     = 5e-2
     T0_E_R  = 2e-2 
     Tbg_E_R = 5e-4
@@ -132,10 +132,6 @@ using Printf
             plts.σ_evo[1]    = Point2.(time_evo, σ_evo)
             plts.Tmax_evo[1] = Point2.(time_evo, Tmax_evo)
             plts.Vmax_evo[1] = Point2.(time_evo, Vmax_evo)
-            # autolimits!(axs.T)
-            # autolimits!(axs.σ_evo)
-            # autolimits!(axs.Tmax_evo)
-            # autolimits!(axs.Vmax_evo)
             # save(@sprintf("anim/step_%04d.png", iframe), fig)
             # iframe += 1
             yield()
